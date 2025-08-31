@@ -8,6 +8,8 @@
   :root{
     --bg:#0b0f14;--panel:#121821;--muted:#1a2230;--text:#e8eef6;--sub:#b1c0d4;--accent:#67b8ff;--accent-2:#89d185;
     --danger:#ff6b6b;--warn:#ffb454;--grid:#233044;--shadow:0 10px 30px rgba(0,0,0,.35);
+    --overlay-offset:14%;      /* % from bottom when on-video */
+    --caption-lane-h:56px;     /* lane height when below video */
   }
   *{box-sizing:border-box}
   html,body{height:100%}
@@ -24,10 +26,12 @@
   .layout{display:grid;grid-template-columns:2fr 1fr;gap:12px}
   .panel{background:var(--panel);border:1px solid #1f2937;border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
   /* Video area */
-  .video-wrap{position:relative;background:#000;overflow:hidden}
+  .video-wrap{position:relative;background:#000}
   video{display:block;width:100%;height:auto;background:#000;position:relative;z-index:1}
-  .overlay{position:absolute;left:0;right:0;bottom:8%;padding:0 6%;text-align:center;pointer-events:none;z-index:5}
-  .overlay .cap{display:inline-block;max-width:92%;background:rgba(0,0,0,.55);padding:.45em .7em;border-radius:8px;font-size:22px;line-height:1.25;color:#fff;text-shadow:0 2px 3px rgba(0,0,0,.6), 0 0 2px #000}
+  .overlay{position:absolute;left:0;right:0;bottom:var(--overlay-offset);padding:0 6%;text-align:center;pointer-events:none;z-index:5}
+  .overlay .cap, .caption-row .cap{display:inline-block;max-width:92%;background:rgba(0,0,0,.55);padding:.45em .7em;border-radius:8px;font-size:22px;line-height:1.25;color:#fff;text-shadow:0 2px 3px rgba(0,0,0,.6), 0 0 2px #000}
+  /* New lane just above the timeline */
+  .caption-row{display:none;height:var(--caption-lane-h);position:relative;z-index:2;align-items:center;justify-content:center;background:#000}
   .controls{position:relative;z-index:3;display:flex;gap:10px;align-items:center;padding:10px;border-top:1px solid #1f2937;background:#0f1520}
   .controls .sp{flex:1}
   .controls input[type="range"]{accent-color:var(--accent)}
@@ -85,6 +89,7 @@
   <div class="panel video-wrap">
     <video id="video" controls crossorigin="anonymous"></video>
     <div class="overlay"><div class="cap" id="overlayText"></div></div>
+    <div class="caption-row" id="captionRow"><div class="cap" id="captionRowText"></div></div>
     <div class="controls">
       <button id="btnPlay">▶︎/❚❚</button>
       <button id="btnToStart">⟸</button>
@@ -97,6 +102,13 @@
     <div class="timeline-wrap">
       <div class="timeline-toolbar">
         <label>Zoom (px/s): <input id="zoom" type="range" min="10" max="200" step="5" value="80"></label>
+        <label style="display:flex;gap:6px;align-items:center">Overlay:
+          <select id="overlayMode">
+            <option value="video" selected>On video</option>
+            <option value="lane">Caption lane</option>
+          </select>
+        </label>
+        <label>Y-offset (%): <input id="overlayY" type="range" min="5" max="30" step="1" value="14"></label>
         <button id="btnAddAtPlayhead">+ New at playhead</button>
         <button id="btnNormalize">Tools: normalize (min 1.8s, clear 0.26s)</button>
         <span class="small">Drag block to move; drag edges to trim. <span class="kbd">⌥←/→</span> start −/+50ms, <span class="kbd">⌥⇧←/→</span> end −/+50ms. Double‑click a block's text to edit inline.</span>
@@ -143,10 +155,10 @@ const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
 
 function tsToMs(ts){
   if(!ts) return null;
-  ts = ts.trim(); // (we'll skip BOM stripping to avoid parser issues in this single-file updater)
+  ts = ts.replace(/\uFEFF/g,'').trim();
   const m = ts.match(/(\d{2}):(\d{2}):(\d{2})[\.,](\d{3})/); // accept "," or "."
   if(!m) return null;
-  const [_,hh,mm,ss,ms] = m; 
+  const [_,hh,mm,ss,ms] = m;
   return ((+hh*60+ +mm)*60+ +ss)*1000 + +ms;
 }
 function msToTs(ms){
@@ -158,6 +170,7 @@ function msToTs(ms){
 }
 
 function parseSrt(text){
+  text = text.replace(/\uFEFF/g,'');
   const blocks = text.replace(/\r/g,'').split(/\n\s*\n/);
   const cues=[];
   for(const b of blocks){
@@ -201,6 +214,11 @@ const state={
 // ---------- Video / Overlay ----------
 const video = qs('#video');
 const overlayText = qs('#overlayText');
+const captionRow = qs('#captionRow');
+const captionRowText = qs('#captionRowText');
+const overlayModeSel = qs('#overlayMode');
+const overlayYInput = qs('#overlayY');
+const overlayEl = qs('.overlay');
 const playheadEl = qs('#playhead');
 const timeGrid = qs('#timeGrid');
 const timeline = qs('#timeline');
@@ -210,10 +228,17 @@ function activeCueAt(ms){
 }
 
 function setOverlay(){
-  if(!state.cues.length){ overlayText.textContent=''; return; }
+  if(!state.cues.length){ overlayText.textContent=''; captionRowText.textContent=''; return; }
   const t = video.currentTime*1000;
   const cue = activeCueAt(t);
-  overlayText.innerHTML = cue ? cue.text.replace(/\n/g,'<br>') : '';
+  const html = cue ? cue.text.replace(/\n/g,'<br>') : '';
+  if(overlayModeSel.value==='video'){
+    overlayText.innerHTML = html;
+    captionRowText.innerHTML = '';
+  } else {
+    captionRowText.innerHTML = html;
+    overlayText.innerHTML = '';
+  }
 }
 
 function updateTimecodes(){
@@ -525,6 +550,22 @@ qs('#zoom').addEventListener('input', (e)=>{
 });
 qs('#btnStepBack').addEventListener('click', ()=>{ const ms=+qs('#frameMs').value||33; video.currentTime=Math.max(0, video.currentTime - ms/1000); scrollPlayheadToCenter(); });
 qs('#btnStepFwd').addEventListener('click', ()=>{ const ms=+qs('#frameMs').value||33; video.currentTime=Math.min(video.duration||1e9, video.currentTime + ms/1000); scrollPlayheadToCenter(); });
+
+// Overlay controls
+overlayModeSel.addEventListener('change', (e)=>{
+  if(e.target.value==='video'){
+    overlayEl.style.display='block';
+    captionRow.style.display='none';
+  } else {
+    overlayEl.style.display='none';
+    captionRow.style.display='flex';
+  }
+  setOverlay();
+});
+overlayYInput.addEventListener('input', (e)=>{
+  document.documentElement.style.setProperty('--overlay-offset', e.target.value+'%');
+});
+document.documentElement.style.setProperty('--overlay-offset', overlayYInput.value+'%');
 
 // Global keyboard (Space toggles play/pause unless typing)
 window.addEventListener('keydown', (ev)=>{
