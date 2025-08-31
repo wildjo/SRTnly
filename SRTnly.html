@@ -281,37 +281,47 @@ function renderCueBlocks(){
     const hr = document.createElement('div'); hr.className='handle right'; el.appendChild(hr);
 
     // Drag move / resize
-    let dragging=false, resizing=null, startX=0, origStart=0, origEnd=0;
     el.addEventListener('mousedown', (ev)=>{
-      if(ev.target===hl) { dragging=true; resizing='L'; }
-      else if(ev.target===hr){ dragging=true; resizing='R'; }
-      else { dragging=true; resizing='M'; }
-      startX = ev.clientX; origStart=c.start; origEnd=c.end;
-      el.style.cursor = (resizing==='M'?'grabbing':'ew-resize');
+      let mode;
+      if(ev.target===hl) mode='L';
+      else if(ev.target===hr) mode='R';
+      else mode='M';
+
+      const startX = ev.clientX,
+            s0 = c.start,
+            e0 = c.end;
+
+      el.style.cursor = (mode==='M' ? 'grabbing' : 'ew-resize');
       selectCue(c.id);
       ev.preventDefault();
-    });
-    window.addEventListener('mousemove', (ev)=>{
-      if(!dragging) return;
-      const dx = ev.clientX - startX; const dt = dx / pxPerMs();
-      if(resizing==='M'){
-        const ns = clamp(origStart+dt,0, Infinity);
-        const ne = clamp(origEnd+dt, ns+10, Infinity);
+
+      function onMove(e){
+        const dt = (e.clientX - startX) / pxPerMs();
+        let ns = s0, ne = e0;
+        if(mode==='M'){
+          ns = clamp(s0 + dt, 0, Infinity);
+          ne = clamp(e0 + dt, ns + 10, Infinity);
+        }else if(mode==='L'){
+          ns = clamp(s0 + dt, 0, e0 - 10);
+        }else if(mode==='R'){
+          ne = clamp(e0 + dt, s0 + 10, Infinity);
+        }
         c.start = ns; c.end = ne;
-      } else if(resizing==='L'){
-        c.start = clamp(origStart+dt, 0, c.end-10);
-      } else if(resizing==='R'){
-        c.end = clamp(origEnd+dt, c.start+10, Infinity);
+        el.style.left = (ns * pxPerMs()) + 'px';
+        el.style.width = Math.max(6, (ne - ns) * pxPerMs()) + 'px';
       }
-      el.style.left = (c.start*pxPerMs())+'px';
-      el.style.width = Math.max(6, (c.end-c.start)*pxPerMs())+'px';
-      syncEditor();
-    });
-    window.addEventListener('mouseup', ()=>{
-      if(!dragging) return;
-      dragging=false; el.style.cursor='grab';
-      renderCueBlocks();
-      renderCueList();
+
+      function onUp(){
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        el.style.cursor = 'grab';
+        renderCueBlocks();
+        renderCueList();
+        syncEditor();
+      }
+
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
     });
 
     el.addEventListener('click', ()=> selectCue(c.id));
