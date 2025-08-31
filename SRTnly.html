@@ -45,7 +45,6 @@
   .cue-block{position:absolute;top:46px;height:60px;border-radius:8px;background:linear-gradient(180deg,#2b3b55aa,#1f2b41aa);border:1px solid #3a4c6b;box-shadow:0 2px 6px rgba(0,0,0,.35);cursor:grab}
   .cue-block.active{outline:2px solid var(--accent)}
   .cue-text{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;color:#d9e6f7;padding:0 6px;text-align:center;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;user-select:text}
-  .cue-text[contenteditable="true"]{outline:2px dashed var(--accent);background:#0f1a2a}
   .handle{position:absolute;top:0;width:8px;height:100%;background:linear-gradient(180deg,#6aa7ff,#387bd6);opacity:.9;cursor:ew-resize}
   .handle.left{left:-4px;border-top-left-radius:8px;border-bottom-left-radius:8px}
   .handle.right{right:-4px;border-top-right-radius:8px;border-bottom-right-radius:8px}
@@ -104,7 +103,7 @@
         <label>Y-offset (%): <input id="overlayY" type="range" min="5" max="30" step="1" value="8"></label>
         <button id="btnAddAtPlayhead">+ New at playhead</button>
         <button id="btnNormalize">Tools: normalize (min 1.8s, clear 0.26s)</button>
-        <span class="small">Drag block to move; drag edges to trim. <span class="kbd">⌥←/→</span> start −/+50ms, <span class="kbd">⌥⇧←/→</span> end −/+50ms. Double‑click a block's text to edit inline.</span>
+        <span class="small">Drag block to move; drag edges to trim. <span class="kbd">⌥←/→</span> start −/+50ms, <span class="kbd">⌥⇧←/→</span> end −/+50ms.</span>
       </div>
       <div class="timeline" id="timeline">
         <div class="time-grid" id="timeGrid"></div>
@@ -116,6 +115,13 @@
   <div class="panel editor">
     <div class="row">
       <div>Selected cue: <span id="selIdx">—</span></div>
+      <label>Start <input id="startInput" type="text" class="timecode" size="12" placeholder="00:00:00,000" /></label>
+      <button class="btn" id="nudgeStartBack">−50ms</button>
+      <button class="btn" id="nudgeStartFwd">+50ms</button>
+      <label>End <input id="endInput" type="text" class="timecode" size="12" placeholder="00:00:00,000" /></label>
+      <button class="btn" id="nudgeEndBack">−50ms</button>
+      <button class="btn" id="nudgeEndFwd">+50ms</button>
+      <button class="btn accent" id="btnApply">Apply</button>
       <div class="sp"></div>
       <button class="btn ghost" id="btnCut">Cut</button>
       <button class="btn ghost" id="btnCopy">Copy</button>
@@ -123,18 +129,9 @@
       <button class="btn danger" id="btnDelete">Delete</button>
     </div>
     <div class="row">
-      <label>Start <input id="startInput" type="text" class="timecode" size="12" placeholder="00:00:00,000" /></label>
-      <button class="btn" id="nudgeStartBack">−50ms</button>
-      <button class="btn" id="nudgeStartFwd">+50ms</button>
-      <label>End <input id="endInput" type="text" class="timecode" size="12" placeholder="00:00:00,000" /></label>
-      <button class="btn" id="nudgeEndBack">−50ms</button>
-      <button class="btn" id="nudgeEndFwd">+50ms</button>
-      <div class="sp"></div>
-      <button class="btn accent" id="btnApply">Apply</button>
-    </div>
-    <div class="row">
       <textarea id="textInput" placeholder="Subtitle text…"></textarea>
     </div>
+    <div class="small" id="cueListLabel">Full subtitle file — click a cue to select and move playhead</div>
     <div class="cue-list" id="cueList"></div>
     <div class="footer">Pro-tip: place the playhead, click "+ New at playhead", edit text, then drag/trim the block on the timeline. Export when happy. Drafts save to your browser.</div>
   </div>
@@ -200,8 +197,7 @@ const state={
   cues:[],
   selected:null,
   zoom:80, // px per second
-  clipboard:null,
-  editing:false,
+  clipboard:null
 };
 
 // ---------- Video / Overlay ----------
@@ -274,44 +270,19 @@ function renderCueBlocks(){
     const hl = document.createElement('div'); hl.className='handle left'; el.appendChild(hl);
     const hr = document.createElement('div'); hr.className='handle right'; el.appendChild(hr);
 
-    // Inline edit on double-click
-    txt.addEventListener('dblclick', (ev)=>{
-      ev.stopPropagation();
-      state.editing = true;
-      txt.contentEditable = 'true';
-      const range = document.createRange(); range.selectNodeContents(txt); range.collapse(false);
-      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
-      txt.focus();
-    });
-    txt.addEventListener('keydown', (ev)=>{
-      if(ev.key==='Enter' && !ev.shiftKey){ ev.preventDefault(); txt.blur(); }
-      if(ev.key==='Escape'){ ev.preventDefault(); txt.blur(); }
-    });
-    txt.addEventListener('blur', ()=>{
-      if(txt.isContentEditable){
-        txt.contentEditable = 'false';
-        state.editing = false;
-        const newText = txt.innerText.replace(/\r/g,'').trim();
-        c.text = newText.replace(/\n\n+/g,'\n');
-        renderCueList();
-      }
-    });
-
-    // Drag move / resize (disabled while editing)
+    // Drag move / resize
     let dragging=false, resizing=null, startX=0, origStart=0, origEnd=0;
     el.addEventListener('mousedown', (ev)=>{
-      if(state.editing) return; // don't drag while editing
       if(ev.target===hl) { dragging=true; resizing='L'; }
       else if(ev.target===hr){ dragging=true; resizing='R'; }
-      else if(ev.target===txt){ dragging=false; resizing=null; return; }
       else { dragging=true; resizing='M'; }
-      startX = ev.clientX; origStart=c.start; origEnd=c.end; 
+      startX = ev.clientX; origStart=c.start; origEnd=c.end;
       el.style.cursor = (resizing==='M'?'grabbing':'ew-resize');
       selectCue(c.id);
       ev.preventDefault();
     });
     window.addEventListener('mousemove', (ev)=>{
-      if(!dragging) return; 
+      if(!dragging) return;
       const dx = ev.clientX - startX; const dt = dx / pxPerMs();
       if(resizing==='M'){
         const ns = clamp(origStart+dt,0, Infinity);
@@ -322,10 +293,16 @@ function renderCueBlocks(){
       } else if(resizing==='R'){
         c.end = clamp(origEnd+dt, c.start+10, Infinity);
       }
-      renderCueBlocks();
+      el.style.left = (c.start*pxPerMs())+'px';
+      el.style.width = Math.max(6, (c.end-c.start)*pxPerMs())+'px';
       syncEditor();
     });
-    window.addEventListener('mouseup', ()=>{ dragging=false; el.style.cursor='grab'; });
+    window.addEventListener('mouseup', ()=>{
+      if(!dragging) return;
+      dragging=false; el.style.cursor='grab';
+      renderCueBlocks();
+      renderCueList();
+    });
 
     el.addEventListener('click', ()=> selectCue(c.id));
     timeGrid.appendChild(el);
