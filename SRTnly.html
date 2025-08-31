@@ -30,6 +30,7 @@
   video{display:block;width:100%;height:auto;background:#000;position:relative;z-index:1}
   .overlay{position:absolute;left:0;right:0;bottom:var(--overlay-bottom,8%);padding:0 6%;text-align:center;pointer-events:none;z-index:5}
   .overlay .cap{display:inline-block;max-width:92%;background:rgba(0,0,0,.55);padding:.45em .7em;border-radius:8px;font-size:22px;line-height:1.25;color:#fff;text-shadow:0 2px 3px rgba(0,0,0,.6), 0 0 2px #000}
+  .overlay .cap.empty{outline:1px dashed var(--sub);min-width:2em;min-height:1em}
   .controls{position:relative;z-index:0;display:flex;gap:10px;align-items:center;padding:10px;border-top:1px solid #1f2937;background:#0f1520}
   .controls .sp{flex:1}
   .controls input[type="range"]{accent-color:var(--accent)}
@@ -213,11 +214,20 @@ function activeCueAt(ms){
 }
 
 function setOverlay(){
-  if(!state.cues.length){ overlayText.textContent=''; return; }
+  if(!state.cues.length){
+    overlayText.textContent='';
+    overlayText.classList.add('empty');
+    return;
+  }
   const t = video.currentTime*1000;
   const cue = activeCueAt(t);
-  const html = cue ? cue.text.replace(/\n/g,'<br>') : '';
-  overlayText.innerHTML = html;
+  if(cue){
+    overlayText.innerHTML = cue.text.replace(/\n/g,'<br>');
+    overlayText.classList.remove('empty');
+  } else {
+    overlayText.innerHTML = '';
+    overlayText.classList.add('empty');
+  }
 }
 
 function updateTimecodes(){
@@ -343,7 +353,12 @@ function selectCue(id, seek=false){
   syncEditor();
   if(seek){
     const c = state.cues.find(x=>x.id===id);
-    if(c) video.currentTime = c.start/1000;
+    if(c){
+      video.currentTime = c.start/1000;
+      setOverlay();
+      updatePlayhead();
+      updateTimecodes();
+    }
   }
 }
 
@@ -458,17 +473,26 @@ timeline.addEventListener('mousedown', (ev)=>{
   if(ev.button!==0) return;
   if(ev.target.closest('.cue-block') || ev.target.classList.contains('handle')) return;
   video.currentTime = clientXToMs(ev)/1000;
+  setOverlay();
+  updatePlayhead();
+  updateTimecodes();
   scrubbing = true;
 });
 
 timeline.addEventListener('click', (ev)=>{
   if(ev.target.closest('.cue-block') || ev.target.classList.contains('handle')) return;
   video.currentTime = clientXToMs(ev)/1000;
+  setOverlay();
+  updatePlayhead();
+  updateTimecodes();
 });
 
 window.addEventListener('mousemove', (ev)=>{
   if(!scrubbing) return;
   video.currentTime = clientXToMs(ev)/1000;
+  setOverlay();
+  updatePlayhead();
+  updateTimecodes();
 });
 window.addEventListener('mouseup', ()=>{ scrubbing=false; });
 
@@ -490,14 +514,14 @@ qs('#fileSrt').addEventListener('change', async (e)=>{
 
 // Video controls
 qs('#btnPlay').addEventListener('click', ()=> video.paused?video.play():video.pause());
-qs('#btnToStart').addEventListener('click', ()=> { video.currentTime=0; scrollPlayheadToCenter(); });
+qs('#btnToStart').addEventListener('click', ()=> { video.currentTime=0; setOverlay(); updatePlayhead(); updateTimecodes(); scrollPlayheadToCenter(); });
 qs('#btnPrevCue').addEventListener('click', ()=>{
   const t = video.currentTime*1000; const prev=[...state.cues].reverse().find(c=>c.start < t-50);
-  if(prev){ video.currentTime = prev.start/1000; scrollPlayheadToCenter(); }
+  if(prev){ video.currentTime = prev.start/1000; setOverlay(); updatePlayhead(); updateTimecodes(); scrollPlayheadToCenter(); }
 });
 qs('#btnNextCue').addEventListener('click', ()=>{
   const t = video.currentTime*1000; const next=state.cues.find(c=>c.start > t+50);
-  if(next){ video.currentTime = next.start/1000; scrollPlayheadToCenter(); }
+  if(next){ video.currentTime = next.start/1000; setOverlay(); updatePlayhead(); updateTimecodes(); scrollPlayheadToCenter(); }
 });
 
 qs('#playback').addEventListener('input', (e)=> video.playbackRate = +e.target.value);
@@ -508,8 +532,8 @@ qs('#zoom').addEventListener('input', (e)=>{
   buildGrid();
   scrollPlayheadToCenter();
 });
-qs('#btnStepBack').addEventListener('click', ()=>{ const ms=+qs('#frameMs').value||33; video.currentTime=Math.max(0, video.currentTime - ms/1000); scrollPlayheadToCenter(); });
-qs('#btnStepFwd').addEventListener('click', ()=>{ const ms=+qs('#frameMs').value||33; video.currentTime=Math.min(video.duration||1e9, video.currentTime + ms/1000); scrollPlayheadToCenter(); });
+qs('#btnStepBack').addEventListener('click', ()=>{ const ms=+qs('#frameMs').value||33; video.currentTime=Math.max(0, video.currentTime - ms/1000); setOverlay(); updatePlayhead(); updateTimecodes(); scrollPlayheadToCenter(); });
+qs('#btnStepFwd').addEventListener('click', ()=>{ const ms=+qs('#frameMs').value||33; video.currentTime=Math.min(video.duration||1e9, video.currentTime + ms/1000); setOverlay(); updatePlayhead(); updateTimecodes(); scrollPlayheadToCenter(); });
 
 // Overlay controls
 overlayYInput.addEventListener('input', (e)=>{
@@ -524,8 +548,8 @@ window.addEventListener('keydown', (ev)=>{
   if(typing) return; // don't hijack keys while editing text or fields
   if(ev.code==='Space'){ ev.preventDefault(); video.paused?video.play():video.pause(); return; }
   const step = +qs('#frameMs').value || 33;
-  if(ev.code==='ArrowLeft' && !ev.altKey && !ev.shiftKey){ ev.preventDefault(); video.currentTime = Math.max(0, video.currentTime - step/1000); }
-  if(ev.code==='ArrowRight'&& !ev.altKey && !ev.shiftKey){ ev.preventDefault(); video.currentTime = Math.min(video.duration||1e9, video.currentTime + step/1000); }
+  if(ev.code==='ArrowLeft' && !ev.altKey && !ev.shiftKey){ ev.preventDefault(); video.currentTime = Math.max(0, video.currentTime - step/1000); setOverlay(); updatePlayhead(); updateTimecodes(); }
+  if(ev.code==='ArrowRight'&& !ev.altKey && !ev.shiftKey){ ev.preventDefault(); video.currentTime = Math.min(video.duration||1e9, video.currentTime + step/1000); setOverlay(); updatePlayhead(); updateTimecodes(); }
   if(ev.altKey && !ev.shiftKey && ev.code==='ArrowLeft'){ ev.preventDefault(); nudge('start', -50); }
   if(ev.altKey && !ev.shiftKey && ev.code==='ArrowRight'){ ev.preventDefault(); nudge('start', 50); }
   if(ev.altKey && ev.shiftKey && ev.code==='ArrowLeft'){ ev.preventDefault(); nudge('end', -50); }
